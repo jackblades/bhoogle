@@ -32,6 +32,7 @@ import qualified System.Directory as Dir
 import qualified Hoogle as H
 import qualified System.Process.Typed as PT
 import qualified Data.ByteString.Lazy as BSL
+-- import           Debug.Trace (trace, traceShow)
 
 
 -- | Events that can be sent
@@ -82,7 +83,8 @@ main = do
   -- Use the default hoogle DB. This may not exist because
   --  1) hoogle generate was never called
   --  2) the system hoogle is a different version from the package used here
-  dbPath <- H.defaultDatabaseLocation
+  -- dbPath <- H.defaultDatabaseLocation
+  let dbPath = "/Users/singhpdz/nix-vm/shell/.stack-work/hoogle"
   Dir.doesFileExist dbPath >>= \case
     True -> runBHoogle dbPath
     False -> do
@@ -99,12 +101,12 @@ runBHoogle :: FilePath -> IO ()
 runBHoogle dbPath = do
   chan <- BCh.newBChan 5 -- ^ create a bounded channel for events
 
-  -- Send a tick event every 1 seconds with the current time
+  -- Send a tick event every 0.5 seconds with the current time
   -- Brick will send this to our event handler which can then update the stTime field
   void . forkIO $ forever $ do
     t <- getTime 
     BCh.writeBChan chan $ EventUpdateTime t
-    threadDelay $ 1 * 1000000
+    threadDelay $ 1 * 500000
 
   -- Initial current time value
   t <- getTime
@@ -317,7 +319,7 @@ drawUI st =
       <=>
       vtitle "docs:"
       <=>
-      B.padLeft (B.Pad 2) (B.txtWrap . reflow $ getSelectedDetail (Txt.pack . clean . H.targetDocs))
+      B.padLeft (B.Pad 2) (B.txtWrap $ getSelectedDetail (Txt.pack . clean . reflowS . H.targetDocs))
       <=>
       B.fill ' '
   
@@ -354,13 +356,20 @@ drawUI st =
 -- | Reformat the text so that it can be wrapped nicely
 reflow :: Text -> Text
 reflow = Txt.replace "\n" " " . Txt.replace "\n\n" "\n" . Txt.replace "\0" "\n"
+-- reflow = Txt.replace "\n\n" "\n" . Txt.replace "\0" "\n"
+
+reflowS :: [Char] -> [Char]
+reflowS [] = []
+reflowS ('\0':xs) = reflowS xs
+reflowS ('\n':xs) = reflowS xs
+reflowS (h:t) = h:reflowS t
 
 
 theMap :: BA.AttrMap
 theMap = BA.attrMap V.defAttr [ (BE.editAttr        , V.black `B.on` V.cyan)
                               , (BE.editFocusedAttr , V.black `B.on` V.yellow)
-                              , (BL.listAttr        , V.white `B.on` V.blue)
-                              , (BL.listSelectedAttr, V.blue `B.on` V.white)
+                              , (BL.listAttr        , B.fg V.white)
+                              , (BL.listSelectedAttr, V.black `B.on` V.white)
                               , ("infoTitle"        , B.fg V.cyan)
                               , ("time"             , B.fg V.yellow)
                               ]
@@ -386,10 +395,29 @@ searchHoogle path f =
 
 -- | Format the hoogle results so they roughly match what the terminal app would show
 formatResult :: H.Target -> Text
-formatResult t =
-  let typ = clean $ H.targetItem t in
-  let m = (clean . fst) <$> H.targetModule t in
-  Txt.pack $ fromMaybe "" m <> " :: " <> typ
+formatResult t = Txt.pack $ targetItem where
+  targetItem = split "" $ clean $ H.targetItem t
+  package = fromMaybe "" (fst <$> H.targetPackage t)
+
+  split name typ@(' ':':':':':' ':_)  = 
+    rpad 15 (reverse name) ++ linewrap 0 (rpad 80 typ <> (' ':' ':'-':'-':' ':package))
+  split name (h:tail) = split (h:name) tail
+  split name [] = reverse name
+
+  rpad n s = s ++ spaces where
+    slen = length s
+    spaces = if slen < n then replicate (n - slen) ' ' else []
+
+  -- lpad n s = spaces ++ s where
+  --   slen = length s
+  --   spaces = if slen < n then replicate (n - slen) ' ' else []
+
+  linewrap :: Int -> [Char] -> [Char]
+  linewrap 100 s = "\n                          " ++ s 
+  linewrap n (c:cs) = c : linewrap (n + 1) cs
+  linewrap _ [] = ""
+  
+
   
 
 clean :: [Char] -> [Char]
@@ -409,7 +437,12 @@ unescapeHTML [] = []
 
 -- | From hakyll source: https://hackage.haskell.org/package/hakyll-4.1.2.1/docs/src/Hakyll-Web-Html.html#stripTags
 stripTags :: [Char] -> [Char]
-stripTags []         = []
+stripTags []                        = []
+stripTags ('<':'u':'l':'>': xs)     = '\n' : stripTags xs
+stripTags ('<':'l':'i':'>': xs)     = '\n' : '-' : ' ' : stripTags xs
+stripTags ('<':'/':'u':'l':'>': xs) = '\n' : stripTags xs
+stripTags ('<':'/':'l':'i':'>': xs) = '\n' : stripTags xs
+stripTags ('<':'p':'r':'e':'>': xs) = '\n' : stripTags xs
 stripTags ('<' : xs) = stripTags $ drop 1 $ dropWhile (/= '>') xs
 stripTags (x : xs)   = x : stripTags xs
 

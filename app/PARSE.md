@@ -1,0 +1,1 @@
+<li><i><i>identity</i></i> <pre><a>pure</a> <a>id</a>\n <a>&lt;*&gt;</a> v = v</pre></li>
